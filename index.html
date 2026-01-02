@@ -74,13 +74,19 @@
             color: #1a73e8;
         }
 
-        .event-selector select {
+        .event-selector input {
             width: 100%;
             padding: 10px;
             border: 2px solid #1a73e8;
             border-radius: 8px;
             font-size: 14px;
             background: white;
+        }
+
+        .event-selector input:focus {
+            outline: none;
+            border-color: #0d47a1;
+            box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
         }
 
         .card {
@@ -190,6 +196,12 @@
             margin-top: 10px;
         }
 
+        .btn-success {
+            background: #0f9d58;
+            color: white;
+            margin-top: 10px;
+        }
+
         .stats {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
@@ -265,11 +277,98 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s;
+            font-size: 14px;
         }
 
         .nav-tab.active {
             background: #1a73e8;
             color: white;
+        }
+
+        /* Bulk Check-in Styles */
+        .bulk-container {
+            margin-top: 20px;
+        }
+
+        .youth-checkbox-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 10px;
+            background: #f8f9fa;
+        }
+
+        .youth-checkbox-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-bottom: 1px solid #e0e0e0;
+            background: white;
+            margin-bottom: 5px;
+            border-radius: 5px;
+        }
+
+        .youth-checkbox-item:last-child {
+            border-bottom: none;
+        }
+
+        .youth-checkbox-item input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 12px;
+            cursor: pointer;
+        }
+
+        .youth-checkbox-label {
+            flex: 1;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .youth-checkbox-name {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .youth-checkbox-id {
+            font-size: 12px;
+            color: #666;
+        }
+
+        .youth-checkbox-item.checked-in {
+            opacity: 0.5;
+            background: #e8f5e9;
+        }
+
+        .youth-checkbox-item.checked-in .youth-checkbox-name::after {
+            content: " ✓";
+            color: #0f9d58;
+        }
+
+        .bulk-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .bulk-actions button {
+            flex: 1;
+        }
+
+        .search-box {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .search-box:focus {
+            outline: none;
+            border-color: #1a73e8;
         }
 
         @media (max-width: 480px) {
@@ -279,6 +378,11 @@
             
             .stats {
                 grid-template-columns: 1fr;
+            }
+
+            .nav-tab {
+                font-size: 12px;
+                padding: 10px 5px;
             }
         }
     </style>
@@ -307,23 +411,22 @@
                     ⚠️ Offline Mode - <span id="queueCount">0</span> scans pending sync
                 </div>
                 
-                <!-- Event Name Selector -->
+                <!-- Event Name Input -->
                 <div class="event-selector">
                     <label for="eventName">Today's Event:</label>
-                    <select id="eventName">
-                        <option value="Weekly Meeting">Weekly Meeting</option>
-                        <option value="Camp">Camp</option>
-                        <option value="Hike">Hike</option>
-                        <option value="Service Project">Service Project</option>
-                        <option value="Game Night">Game Night</option>
-                        <option value="Special Event">Special Event</option>
-                    </select>
+                    <input 
+                        type="text" 
+                        id="eventName" 
+                        placeholder="e.g., Weekly Meeting, Camp, Hike, Service Project"
+                        value="Weekly Meeting"
+                    />
                 </div>
             </div>
 
             <!-- Navigation Tabs -->
             <div class="nav-tabs">
                 <button class="nav-tab active" onclick="showView('scanner')">Scanner</button>
+                <button class="nav-tab" onclick="showView('bulk')">Bulk Check-in</button>
                 <button class="nav-tab" onclick="showView('attendance')">Today's List</button>
             </div>
 
@@ -333,6 +436,34 @@
                     <h2 style="margin-bottom: 15px;">Scan Youth QR Code</h2>
                     <div id="reader"></div>
                     <div id="scanResult" class="scan-result"></div>
+                </div>
+            </div>
+
+            <!-- Bulk Check-in View -->
+            <div id="bulkView" class="card hidden">
+                <h2 style="margin-bottom: 15px;">Bulk Check-in</h2>
+                
+                <input 
+                    type="text" 
+                    id="searchBox" 
+                    class="search-box" 
+                    placeholder="Search youth by name or ID..."
+                    onkeyup="filterYouthList()"
+                />
+                
+                <div class="bulk-container">
+                    <div class="youth-checkbox-list" id="youthCheckboxList">
+                        <div class="loading">Loading youth roster...</div>
+                    </div>
+                    
+                    <div class="bulk-actions">
+                        <button class="btn btn-secondary" onclick="selectAllYouth()">Select All</button>
+                        <button class="btn btn-secondary" onclick="deselectAllYouth()">Deselect All</button>
+                    </div>
+                    
+                    <button class="btn btn-success" onclick="bulkCheckIn()">
+                        Check In Selected Youth
+                    </button>
                 </div>
             </div>
 
@@ -381,8 +512,8 @@
             SPREADSHEET_ID: '1Y9ialF858KpYRfX0cf8SG1tpjIyVOAgkIwuYfhvoj7w',
             YOUTH_SHEET: 'Youth',
             ATTENDANCE_SHEET: 'Attendance',
-            CLIENT_ID: '29190602668-eop3lg6ma83reshginn31pbg38gfof19.apps.googleusercontent.com',
-            API_KEY: 'AIzaSyDtpB6fnh3wTkqRcmmJDkdcs5nW-vIOPiU',
+            CLIENT_ID: 'YOUR_GOOGLE_CLIENT_ID_HERE.apps.googleusercontent.com',
+            API_KEY: 'YOUR_GOOGLE_API_KEY_HERE',
             SCOPES: 'https://www.googleapis.com/auth/spreadsheets'
         };
 
@@ -395,7 +526,7 @@
         let youthRoster = [];
         let todayAttendance = [];
         let offlineQueue = [];
-        let isScanning = false; // Prevent duplicate scans
+        let isScanning = false;
         let lastScannedCode = null;
         let lastScanTime = 0;
 
@@ -467,6 +598,7 @@
             await loadTodayAttendance();
             
             initScanner();
+            renderBulkCheckInList();
         }
 
         function signOut() {
@@ -492,7 +624,7 @@
                     name: row[1],
                     team: row[2],
                     active: row[3] === 'TRUE'
-                }));
+                })).filter(y => y.active);
                 
                 localStorage.setItem('youthRoster', JSON.stringify(youthRoster));
             } catch (err) {
@@ -525,14 +657,14 @@
                     }));
                 
                 updateAttendanceDisplay();
+                renderBulkCheckInList();
             } catch (err) {
                 console.error('Error loading attendance:', err);
             }
         }
 
-        // Record Attendance (FIXED - No more duplicates!)
+        // Record Attendance
         async function recordAttendance(youthId, youthName) {
-            // Prevent duplicate scans within 3 seconds
             const now = Date.now();
             if (lastScannedCode === youthId && (now - lastScanTime) < 3000) {
                 console.log('Ignoring duplicate scan');
@@ -551,7 +683,7 @@
             const timestamp = new Date().toISOString();
             const date = new Date().toISOString().split('T')[0];
             const time = new Date().toLocaleTimeString();
-            const eventName = document.getElementById('eventName').value;
+            const eventName = document.getElementById('eventName').value.trim() || 'Weekly Meeting';
             
             const record = {
                 timestamp,
@@ -561,7 +693,6 @@
                 eventName
             };
             
-            // Check if already checked in today
             const alreadyCheckedIn = todayAttendance.some(a => a.youthId === youthId);
             if (alreadyCheckedIn) {
                 showScanResult(`${youthName} already checked in today!`, 'error');
@@ -583,6 +714,7 @@
                     todayAttendance.push(record);
                     showScanResult(`✓ ${youthName} checked in at ${time}`, 'success');
                     updateAttendanceDisplay();
+                    renderBulkCheckInList();
                     
                     if (offlineQueue.length > 0) {
                         await syncOfflineQueue();
@@ -597,10 +729,107 @@
                 showScanResult(`⚠️ Saved offline: ${youthName}`, 'error');
             }
             
-            // Reset scanning flag after 1 second
             setTimeout(() => {
                 isScanning = false;
             }, 1000);
+        }
+
+        // Bulk Check-in Functions
+        function renderBulkCheckInList() {
+            const listDiv = document.getElementById('youthCheckboxList');
+            
+            if (youthRoster.length === 0) {
+                listDiv.innerHTML = '<div class="loading">No active youth found</div>';
+                return;
+            }
+            
+            listDiv.innerHTML = youthRoster
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(youth => {
+                    const isCheckedIn = todayAttendance.some(a => a.youthId === youth.id);
+                    return `
+                        <div class="youth-checkbox-item ${isCheckedIn ? 'checked-in' : ''}" data-youth-id="${youth.id}" data-youth-name="${youth.name}">
+                            <input 
+                                type="checkbox" 
+                                id="youth_${youth.id}" 
+                                value="${youth.id}"
+                                ${isCheckedIn ? 'disabled' : ''}
+                            />
+                            <label for="youth_${youth.id}" class="youth-checkbox-label">
+                                <span class="youth-checkbox-name">${youth.name}</span>
+                                <span class="youth-checkbox-id">${youth.id}</span>
+                            </label>
+                        </div>
+                    `;
+                }).join('');
+        }
+
+        function filterYouthList() {
+            const searchTerm = document.getElementById('searchBox').value.toLowerCase();
+            const items = document.querySelectorAll('.youth-checkbox-item');
+            
+            items.forEach(item => {
+                const name = item.dataset.youthName.toLowerCase();
+                const id = item.dataset.youthId.toLowerCase();
+                
+                if (name.includes(searchTerm) || id.includes(searchTerm)) {
+                    item.style.display = 'flex';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        function selectAllYouth() {
+            const checkboxes = document.querySelectorAll('#youthCheckboxList input[type="checkbox"]:not(:disabled)');
+            checkboxes.forEach(cb => cb.checked = true);
+        }
+
+        function deselectAllYouth() {
+            const checkboxes = document.querySelectorAll('#youthCheckboxList input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = false);
+        }
+
+        async function bulkCheckIn() {
+            const checkboxes = document.querySelectorAll('#youthCheckboxList input[type="checkbox"]:checked');
+            
+            if (checkboxes.length === 0) {
+                alert('Please select at least one youth to check in');
+                return;
+            }
+            
+            const eventName = document.getElementById('eventName').value.trim() || 'Weekly Meeting';
+            const timestamp = new Date().toISOString();
+            const date = new Date().toISOString().split('T')[0];
+            
+            const records = [];
+            checkboxes.forEach(cb => {
+                const youthId = cb.value;
+                const youth = youthRoster.find(y => y.id === youthId);
+                if (youth) {
+                    records.push([timestamp, date, youthId, eventName, 'Bulk check-in']);
+                }
+            });
+            
+            if (records.length === 0) return;
+            
+            try {
+                await gapi.client.sheets.spreadsheets.values.append({
+                    spreadsheetId: CONFIG.SPREADSHEET_ID,
+                    range: `${CONFIG.ATTENDANCE_SHEET}!A:E`,
+                    valueInputOption: 'USER_ENTERED',
+                    resource: {
+                        values: records
+                    }
+                });
+                
+                alert(`✓ Successfully checked in ${records.length} youth!`);
+                await loadTodayAttendance();
+                deselectAllYouth();
+            } catch (err) {
+                console.error('Error with bulk check-in:', err);
+                alert('Error: Could not complete bulk check-in. Please try again.');
+            }
         }
 
         // QR Scanner
@@ -608,7 +837,7 @@
             html5QrCode = new Html5Qrcode("reader");
             
             const config = {
-                fps: 5, // Reduced from 10 to prevent rapid duplicate scans
+                fps: 5,
                 qrbox: { width: 250, height: 250 },
                 aspectRatio: 1.0
             };
@@ -666,7 +895,7 @@
 
         function updateAttendanceDisplay() {
             const count = todayAttendance.length;
-            const total = youthRoster.filter(y => y.active).length;
+            const total = youthRoster.length;
             const percent = total > 0 ? Math.round((count / total) * 100) : 0;
             
             document.getElementById('checkedInCount').textContent = count;
@@ -684,7 +913,7 @@
                     <div class="attendance-item">
                         <div>
                             <div class="attendance-name">${youth?.name || a.youthId}</div>
-                            <div class="attendance-id">${a.youthId}</div>
+                            <div class="attendance-id">${a.youthId} • ${a.eventName}</div>
                         </div>
                         <div class="attendance-time">${time}</div>
                     </div>
@@ -701,11 +930,15 @@
             });
             event.target.classList.add('active');
             
+            document.getElementById('scannerView').classList.add('hidden');
+            document.getElementById('bulkView').classList.add('hidden');
+            document.getElementById('attendanceView').classList.add('hidden');
+            
             if (view === 'scanner') {
                 document.getElementById('scannerView').classList.remove('hidden');
-                document.getElementById('attendanceView').classList.add('hidden');
+            } else if (view === 'bulk') {
+                document.getElementById('bulkView').classList.remove('hidden');
             } else {
-                document.getElementById('scannerView').classList.add('hidden');
                 document.getElementById('attendanceView').classList.remove('hidden');
                 refreshAttendance();
             }
