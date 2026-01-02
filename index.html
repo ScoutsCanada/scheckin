@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#1a73e8">
     <title>ScheckIn - Attendance Scanner</title>
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="./manifest.json">
     <style>
         * {
             margin: 0;
@@ -60,6 +60,29 @@
             font-weight: 600;
         }
 
+        .event-selector {
+            margin-top: 15px;
+            padding: 15px;
+            background: #e8f0fe;
+            border-radius: 8px;
+        }
+
+        .event-selector label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #1a73e8;
+        }
+
+        .event-selector select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #1a73e8;
+            border-radius: 8px;
+            font-size: 14px;
+            background: white;
+        }
+
         .card {
             background: white;
             border-radius: 15px;
@@ -95,6 +118,18 @@
 
         .scan-result.show {
             display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         .attendance-list {
@@ -271,6 +306,19 @@
                 <div id="syncQueue" class="sync-queue hidden">
                     ⚠️ Offline Mode - <span id="queueCount">0</span> scans pending sync
                 </div>
+                
+                <!-- Event Name Selector -->
+                <div class="event-selector">
+                    <label for="eventName">Today's Event:</label>
+                    <select id="eventName">
+                        <option value="Weekly Meeting">Weekly Meeting</option>
+                        <option value="Camp">Camp</option>
+                        <option value="Hike">Hike</option>
+                        <option value="Service Project">Service Project</option>
+                        <option value="Game Night">Game Night</option>
+                        <option value="Special Event">Special Event</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Navigation Tabs -->
@@ -333,8 +381,8 @@
             SPREADSHEET_ID: '1Y9ialF858KpYRfX0cf8SG1tpjIyVOAgkIwuYfhvoj7w',
             YOUTH_SHEET: 'Youth',
             ATTENDANCE_SHEET: 'Attendance',
-            CLIENT_ID: '29190602668-eop3lg6ma83reshginn31pbg38gfof19.apps.googleusercontent.com', // You'll need to create this
-            API_KEY: 'AIzaSyDtpB6fnh3wTkqRcmmJDkdcs5nW-vIOPiU', // You'll need to create this
+            CLIENT_ID: '29190602668-eop3lg6ma83reshginn31pbg38gfof19.apps.googleusercontent.com',
+            API_KEY: 'AIzaSyDtpB6fnh3wTkqRcmmJDkdcs5nW-vIOPiU',
             SCOPES: 'https://www.googleapis.com/auth/spreadsheets'
         };
 
@@ -347,6 +395,9 @@
         let youthRoster = [];
         let todayAttendance = [];
         let offlineQueue = [];
+        let isScanning = false; // Prevent duplicate scans
+        let lastScannedCode = null;
+        let lastScanTime = 0;
 
         // Initialize on load
         window.addEventListener('load', () => {
@@ -407,19 +458,14 @@
         }
 
         async function onSignIn() {
-            // Get user info
-            const user = gapi.client.getToken();
             document.getElementById('userEmail').textContent = 'Signed In';
             
-            // Show app view
             document.getElementById('authView').classList.add('hidden');
             document.getElementById('appView').classList.remove('hidden');
             
-            // Load data
             await loadYouthRoster();
             await loadTodayAttendance();
             
-            // Initialize scanner
             initScanner();
         }
 
@@ -448,11 +494,9 @@
                     active: row[3] === 'TRUE'
                 }));
                 
-                // Store in localStorage for offline use
                 localStorage.setItem('youthRoster', JSON.stringify(youthRoster));
             } catch (err) {
                 console.error('Error loading roster:', err);
-                // Load from localStorage if available
                 const cached = localStorage.getItem('youthRoster');
                 if (cached) {
                     youthRoster = JSON.parse(cached);
@@ -486,25 +530,42 @@
             }
         }
 
-        // Record Attendance
+        // Record Attendance (FIXED - No more duplicates!)
         async function recordAttendance(youthId, youthName) {
-            const now = new Date();
-            const timestamp = now.toISOString();
-            const date = now.toISOString().split('T')[0];
-            const time = now.toLocaleTimeString();
+            // Prevent duplicate scans within 3 seconds
+            const now = Date.now();
+            if (lastScannedCode === youthId && (now - lastScanTime) < 3000) {
+                console.log('Ignoring duplicate scan');
+                return;
+            }
+            
+            if (isScanning) {
+                console.log('Already processing a scan');
+                return;
+            }
+            
+            isScanning = true;
+            lastScannedCode = youthId;
+            lastScanTime = now;
+            
+            const timestamp = new Date().toISOString();
+            const date = new Date().toISOString().split('T')[0];
+            const time = new Date().toLocaleTimeString();
+            const eventName = document.getElementById('eventName').value;
             
             const record = {
                 timestamp,
                 date,
                 youthId,
                 youthName,
-                eventName: 'Weekly Meeting'
+                eventName
             };
             
             // Check if already checked in today
             const alreadyCheckedIn = todayAttendance.some(a => a.youthId === youthId);
             if (alreadyCheckedIn) {
                 showScanResult(`${youthName} already checked in today!`, 'error');
+                isScanning = false;
                 return;
             }
             
@@ -515,7 +576,7 @@
                         range: `${CONFIG.ATTENDANCE_SHEET}!A:E`,
                         valueInputOption: 'USER_ENTERED',
                         resource: {
-                            values: [[timestamp, date, youthId, record.eventName, '']]
+                            values: [[timestamp, date, youthId, eventName, '']]
                         }
                     });
                     
@@ -523,7 +584,6 @@
                     showScanResult(`✓ ${youthName} checked in at ${time}`, 'success');
                     updateAttendanceDisplay();
                     
-                    // Process offline queue if exists
                     if (offlineQueue.length > 0) {
                         await syncOfflineQueue();
                     }
@@ -536,6 +596,11 @@
                 addToOfflineQueue(record);
                 showScanResult(`⚠️ Saved offline: ${youthName}`, 'error');
             }
+            
+            // Reset scanning flag after 1 second
+            setTimeout(() => {
+                isScanning = false;
+            }, 1000);
         }
 
         // QR Scanner
@@ -543,7 +608,7 @@
             html5QrCode = new Html5Qrcode("reader");
             
             const config = {
-                fps: 10,
+                fps: 5, // Reduced from 10 to prevent rapid duplicate scans
                 qrbox: { width: 250, height: 250 },
                 aspectRatio: 1.0
             };
@@ -561,7 +626,6 @@
         }
 
         function onScanSuccess(decodedText) {
-            // Parse QR code: ScheckIn:C-0001:19thCubs:v1
             const parts = decodedText.split(':');
             
             if (parts[0] !== 'ScheckIn' || parts.length < 3) {
@@ -632,13 +696,11 @@
         }
 
         function showView(view) {
-            // Update tabs
             document.querySelectorAll('.nav-tab').forEach(tab => {
                 tab.classList.remove('active');
             });
             event.target.classList.add('active');
             
-            // Show/hide views
             if (view === 'scanner') {
                 document.getElementById('scannerView').classList.remove('hidden');
                 document.getElementById('attendanceView').classList.add('hidden');
