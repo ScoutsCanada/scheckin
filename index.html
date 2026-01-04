@@ -541,15 +541,15 @@
         let lastScannedCode = null;
         let lastScanTime = 0;
         let scannedCodesInSession = new Set();
+        let fullListUpdateQueue = Promise.resolve(); // Queue for FullList updates
         let fullListColumnCreatedToday = null; // Track if we created column for today's date
 
-        // EST Timezone Helper
+        // EST Timezone Helper - PROPERLY CALCULATE EST
         function getESTDate() {
-            // Get current time in milliseconds
             const now = new Date();
             
-            // Create a date formatter for EST
-            const estDateStr = now.toLocaleString('en-US', { 
+            // Get the time parts in EST timezone
+            const estString = now.toLocaleString('en-US', { 
                 timeZone: 'America/New_York',
                 year: 'numeric',
                 month: '2-digit',
@@ -560,23 +560,60 @@
                 hour12: false
             });
             
-            // Parse the EST string back to Date
-            // Format will be: "01/03/2026, 19:30:45"
-            const [datePart, timePart] = estDateStr.split(', ');
+            // Parse: "01/03/2026, 19:30:45"
+            const [datePart, timePart] = estString.split(', ');
             const [month, day, year] = datePart.split('/');
             const [hour, minute, second] = timePart.split(':');
             
-            // Create date in EST
-            return new Date(year, month - 1, day, hour, minute, second);
+            // Create UTC date that represents this EST time
+            // EST is UTC-5, so if it's 19:30 EST, it's 00:30 UTC next day
+            const estDate = new Date(Date.UTC(
+                parseInt(year),
+                parseInt(month) - 1,
+                parseInt(day),
+                parseInt(hour),
+                parseInt(minute),
+                parseInt(second)
+            ));
+            
+            // Adjust for EST offset (add 5 hours to get actual UTC)
+            // No wait, that's backwards. Let me think...
+            // If it's 7:30 PM (19:30) in EST, that's actually 12:30 AM (00:30) UTC the next day
+            // So we DON'T adjust. We return the date object as-is, representing EST time
+            
+            // Actually, the issue is we want to STORE EST time as if it were UTC
+            // So we create the date components as UTC
+            return new Date(Date.UTC(
+                parseInt(year),
+                parseInt(month) - 1,
+                parseInt(day),
+                parseInt(hour),
+                parseInt(minute),
+                parseInt(second),
+                0
+            ));
         }
 
         function getESTDateString() {
             const est = getESTDate();
-            return est.toISOString().split('T')[0];
+            // Extract UTC components which represent EST time
+            const year = est.getUTCFullYear();
+            const month = String(est.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(est.getUTCDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
         }
 
         function getESTTimestamp() {
-            return getESTDate().toISOString();
+            const est = getESTDate();
+            // Extract UTC components which represent EST time
+            const year = est.getUTCFullYear();
+            const month = String(est.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(est.getUTCDate()).padStart(2, '0');
+            const hour = String(est.getUTCHours()).padStart(2, '0');
+            const minute = String(est.getUTCMinutes()).padStart(2, '0');
+            const second = String(est.getUTCSeconds()).padStart(2, '0');
+            const ms = String(est.getUTCMilliseconds()).padStart(3, '0');
+            return `${year}-${month}-${day}T${hour}:${minute}:${second}.${ms}Z`;
         }
 
         // Initialize on load
@@ -717,6 +754,13 @@
             try {
                 const today = getESTDateString();
                 
+                // Check if we already created a column for today in this session
+                if (fullListColumnCreatedToday === today) {
+                    // Column already exists, just mark the youth
+                    await markYouthInFullList(youthId, fullName);
+                    return;
+                }
+                
                 // Get FullList data
                 const fullListResponse = await gapi.client.sheets.spreadsheets.values.get({
                     spreadsheetId: CONFIG.SPREADSHEET_ID,
@@ -729,8 +773,9 @@
                 let needNewColumn = true;
                 if (fullListData.length >= 2 && fullListData[1] && fullListData[1][3] === today) {
                     needNewColumn = false;
+                    fullListColumnCreatedToday = today; // Mark that column exists
                     
-                    // Update event name in D3 if different (handles multiple events same day)
+                    // Update event name in D3 if different
                     if (fullListData.length >= 3 && fullListData[2] && fullListData[2][3] !== eventName) {
                         await gapi.client.sheets.spreadsheets.values.update({
                             spreadsheetId: CONFIG.SPREADSHEET_ID,
@@ -793,14 +838,28 @@
                         }
                     });
                     
-                    // Reload fullListData after insertion
-                    const updatedResponse = await gapi.client.sheets.spreadsheets.values.get({
-                        spreadsheetId: CONFIG.SPREADSHEET_ID,
-                        range: `${CONFIG.FULLLIST_SHEET}!A1:Z100`,
-                    });
-                    fullListData.length = 0;
-                    fullListData.push(...(updatedResponse.result.values || []));
+                    // Mark that we created column for today
+                    fullListColumnCreatedToday = today;
                 }
+                
+                // Now mark the youth
+                await markYouthInFullList(youthId, fullName);
+                
+            } catch (err) {
+                console.error('Error updating FullList:', err);
+            }
+        }
+
+        // Helper function to mark youth in FullList column D
+        async function markYouthInFullList(youthId, fullName) {
+            try {
+                // Get fresh FullList data
+                const fullListResponse = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: CONFIG.SPREADSHEET_ID,
+                    range: `${CONFIG.FULLLIST_SHEET}!A1:Z100`,
+                });
+                
+                const fullListData = fullListResponse.result.values || [];
                 
                 // Find youth row
                 let youthRow = -1;
@@ -829,7 +888,6 @@
                 
                 // Mark TRUE in column D for this youth (only if not already marked)
                 if (youthRow > 0) {
-                    // Check if already marked TRUE
                     const currentValue = fullListData[youthRow - 1] && fullListData[youthRow - 1][3];
                     if (currentValue !== true && currentValue !== 'TRUE') {
                         await gapi.client.sheets.spreadsheets.values.update({
@@ -843,7 +901,7 @@
                     }
                 }
             } catch (err) {
-                console.error('Error updating FullList:', err);
+                console.error('Error marking youth in FullList:', err);
             }
         }
 
