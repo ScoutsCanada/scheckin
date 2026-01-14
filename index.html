@@ -1350,6 +1350,139 @@
             document.getElementById('dateDisplay').textContent = est.toLocaleDateString('en-US', options);
         }
 
+        // Event Confirmation Functions
+        function confirmEvent() {
+            const eventName = document.getElementById('eventName').value.trim();
+            
+            if (!eventName) {
+                alert('Please enter an event name');
+                document.getElementById('eventName').focus();
+                return;
+            }
+            
+            // Mark as confirmed
+            isEventConfirmed = true;
+            
+            // Save to localStorage
+            const today = getESTDateString();
+            localStorage.setItem('eventConfirmedDate', today);
+            localStorage.setItem('confirmedEventName', eventName);
+            
+            // Update UI
+            document.getElementById('eventName').disabled = true;
+            document.getElementById('confirmEventBtn').classList.add('hidden');
+            document.getElementById('changeEventBtn').classList.remove('hidden');
+            document.getElementById('eventConfirmedIcon').classList.remove('hidden');
+            document.getElementById('eventWarning').classList.add('hidden');
+            document.getElementById('eventConfirmedMsg').classList.remove('hidden');
+            document.getElementById('confirmedEventText').textContent = eventName;
+            
+            // Enable tabs
+            document.getElementById('scannerTab').disabled = false;
+            document.getElementById('bulkTab').disabled = false;
+            document.getElementById('listTab').disabled = false;
+            
+            // Initialize scanner now that event is confirmed
+            if (html5QrCode === undefined) {
+                initScanner();
+            }
+            
+            console.log('Event confirmed:', eventName);
+        }
+
+        // Confirm event silently (when loading from localStorage)
+        function confirmEventSilently() {
+            const eventName = document.getElementById('eventName').value.trim();
+            
+            if (!eventName) return;
+            
+            isEventConfirmed = true;
+            
+            // Update UI
+            document.getElementById('eventName').disabled = true;
+            document.getElementById('confirmEventBtn').classList.add('hidden');
+            document.getElementById('changeEventBtn').classList.remove('hidden');
+            document.getElementById('eventConfirmedIcon').classList.remove('hidden');
+            document.getElementById('eventWarning').classList.add('hidden');
+            document.getElementById('eventConfirmedMsg').classList.remove('hidden');
+            document.getElementById('confirmedEventText').textContent = eventName;
+            
+            // Enable tabs
+            document.getElementById('scannerTab').disabled = false;
+            document.getElementById('bulkTab').disabled = false;
+            document.getElementById('listTab').disabled = false;
+        }
+
+        // Change event function
+        function changeEvent() {
+            // Confirm with user
+            if (!confirm('Changing the event will disable check-in until you confirm the new event. Continue?')) {
+                return;
+            }
+            
+            // Mark as not confirmed
+            isEventConfirmed = false;
+            
+            // Clear localStorage
+            localStorage.removeItem('eventConfirmedDate');
+            localStorage.removeItem('confirmedEventName');
+            
+            // Update UI
+            document.getElementById('eventName').disabled = false;
+            document.getElementById('confirmEventBtn').classList.remove('hidden');
+            document.getElementById('changeEventBtn').classList.add('hidden');
+            document.getElementById('eventConfirmedIcon').classList.add('hidden');
+            document.getElementById('eventWarning').classList.remove('hidden');
+            document.getElementById('eventConfirmedMsg').classList.add('hidden');
+            
+            // Disable tabs
+            document.getElementById('scannerTab').disabled = true;
+            document.getElementById('bulkTab').disabled = true;
+            document.getElementById('listTab').disabled = true;
+            
+            // Switch to scanner tab (disabled state)
+            document.getElementById('scannerTab').classList.add('active');
+            document.getElementById('bulkTab').classList.remove('active');
+            document.getElementById('listTab').classList.remove('active');
+            
+            // Show scanner view
+            document.getElementById('scannerView').classList.remove('hidden');
+            document.getElementById('bulkView').classList.add('hidden');
+            document.getElementById('attendanceView').classList.add('hidden');
+            
+            // Focus on input
+            document.getElementById('eventName').focus();
+            document.getElementById('eventName').select();
+            
+            console.log('Event change mode activated');
+        }
+
+        function showView(view) {
+            // Don't allow switching if event not confirmed
+            if (!isEventConfirmed) {
+                alert('Please confirm today\'s event before starting check-in');
+                return;
+            }
+            
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            document.getElementById('scannerView').classList.add('hidden');
+            document.getElementById('bulkView').classList.add('hidden');
+            document.getElementById('attendanceView').classList.add('hidden');
+            
+            if (view === 'scanner') {
+                document.getElementById('scannerView').classList.remove('hidden');
+            } else if (view === 'bulk') {
+                document.getElementById('bulkView').classList.remove('hidden');
+            } else {
+                document.getElementById('attendanceView').classList.remove('hidden');
+                refreshAttendance();
+            }
+        }
+
         // Offline Support
         function checkOnlineStatus() {
             const updateStatus = () => {
