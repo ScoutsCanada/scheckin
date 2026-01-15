@@ -107,16 +107,6 @@
             color: #856404;
         }
 
-        .event-confirmed {
-            margin-top: 8px;
-            padding: 8px 12px;
-            background: #e8f5e9;
-            border-left: 4px solid #0f9d58;
-            border-radius: 4px;
-            font-size: 13px;
-            color: #1b5e20;
-        }
-
         .card {
             background: white;
             border-radius: 12px;
@@ -464,20 +454,17 @@
                             id="eventName" 
                             placeholder="e.g., Weekly Meeting, Camp, Hike"
                             value="Weekly Meeting"
+                            style="flex: 1;"
                         />
                         <button class="btn btn-primary" id="confirmEventBtn" onclick="confirmEvent()" style="width: auto; padding: 8px 20px; white-space: nowrap;">
                             Confirm
                         </button>
-                        <button class="btn btn-secondary hidden" id="changeEventBtn" onclick="changeEvent()" style="width: auto; padding: 8px 20px; white-space: nowrap;">
+                        <button class="btn btn-secondary hidden" id="changeEventBtn" onclick="changeEvent()" style="width: auto; padding: 8px 16px; white-space: nowrap; font-size: 13px;">
                             Change
                         </button>
-                        <span class="hidden" id="eventConfirmedIcon" style="color: #0f9d58; font-size: 20px; font-weight: bold;">✓</span>
                     </div>
                     <div id="eventWarning" class="event-warning">
                         ⚠️ Please confirm today's event before starting check-in
-                    </div>
-                    <div id="eventConfirmedMsg" class="event-confirmed hidden">
-                        ✓ Event confirmed: <strong id="confirmedEventText"></strong>
                     </div>
                 </div>
             </div>
@@ -1372,10 +1359,7 @@
             document.getElementById('eventName').disabled = true;
             document.getElementById('confirmEventBtn').classList.add('hidden');
             document.getElementById('changeEventBtn').classList.remove('hidden');
-            document.getElementById('eventConfirmedIcon').classList.remove('hidden');
             document.getElementById('eventWarning').classList.add('hidden');
-            document.getElementById('eventConfirmedMsg').classList.remove('hidden');
-            document.getElementById('confirmedEventText').textContent = eventName;
             
             // Enable tabs
             document.getElementById('scannerTab').disabled = false;
@@ -1402,10 +1386,7 @@
             document.getElementById('eventName').disabled = true;
             document.getElementById('confirmEventBtn').classList.add('hidden');
             document.getElementById('changeEventBtn').classList.remove('hidden');
-            document.getElementById('eventConfirmedIcon').classList.remove('hidden');
             document.getElementById('eventWarning').classList.add('hidden');
-            document.getElementById('eventConfirmedMsg').classList.remove('hidden');
-            document.getElementById('confirmedEventText').textContent = eventName;
             
             // Enable tabs
             document.getElementById('scannerTab').disabled = false;
@@ -1431,9 +1412,7 @@
             document.getElementById('eventName').disabled = false;
             document.getElementById('confirmEventBtn').classList.remove('hidden');
             document.getElementById('changeEventBtn').classList.add('hidden');
-            document.getElementById('eventConfirmedIcon').classList.add('hidden');
             document.getElementById('eventWarning').classList.remove('hidden');
-            document.getElementById('eventConfirmedMsg').classList.add('hidden');
             
             // Disable tabs
             document.getElementById('scannerTab').disabled = true;
