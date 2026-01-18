@@ -704,8 +704,10 @@
             };
 
             if (gapi.client.getToken() === null) {
-                tokenClient.requestAccessToken({prompt: 'consent'});
+                // First sign-in - use select_account instead of consent
+                tokenClient.requestAccessToken({prompt: 'select_account'});
             } else {
+                // Already signed in - silent refresh
                 tokenClient.requestAccessToken({prompt: ''});
             }
         }
