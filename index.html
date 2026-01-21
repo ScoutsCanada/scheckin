@@ -578,7 +578,7 @@
         let lastScanTime = 0;
         let scannedCodesInSession = new Set();
         let fullListUpdateQueue = Promise.resolve(); // Queue for FullList updates
-        let fullListColumnCreatedToday = null; // Track if we created column for today's date
+        let isEventConfirmed = false; // Track if event is confirmed
 
         // EST Timezone Helper - PROPERLY CALCULATE EST
         function getESTDate() {
