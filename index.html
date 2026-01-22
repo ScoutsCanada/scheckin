@@ -1,3 +1,5 @@
+[file name]: index.html
+[file content begin]
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -578,7 +580,6 @@
         let lastScanTime = 0;
         let scannedCodesInSession = new Set();
         let fullListUpdateQueue = Promise.resolve(); // Queue for FullList updates
-        let isEventConfirmed = false; // Track if event is confirmed
 
         // EST Timezone Helper - PROPERLY CALCULATE EST
         function getESTDate() {
@@ -602,23 +603,6 @@
             const [hour, minute, second] = timePart.split(':');
             
             // Create UTC date that represents this EST time
-            // EST is UTC-5, so if it's 19:30 EST, it's 00:30 UTC next day
-            const estDate = new Date(Date.UTC(
-                parseInt(year),
-                parseInt(month) - 1,
-                parseInt(day),
-                parseInt(hour),
-                parseInt(minute),
-                parseInt(second)
-            ));
-            
-            // Adjust for EST offset (add 5 hours to get actual UTC)
-            // No wait, that's backwards. Let me think...
-            // If it's 7:30 PM (19:30) in EST, that's actually 12:30 AM (00:30) UTC the next day
-            // So we DON'T adjust. We return the date object as-is, representing EST time
-            
-            // Actually, the issue is we want to STORE EST time as if it were UTC
-            // So we create the date components as UTC
             return new Date(Date.UTC(
                 parseInt(year),
                 parseInt(month) - 1,
@@ -628,6 +612,30 @@
                 parseInt(second),
                 0
             ));
+        }
+
+        // Get date in "Jan 20, 2026" format for FullList
+        function getFullListDateString() {
+            const est = getESTDate();
+            // Format as "MMM D, YYYY" (Jan 20, 2026)
+            return est.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                timeZone: 'America/New_York'
+            });
+        }
+
+        // Parse "Jan 20, 2026" format to compare dates
+        function parseFullListDate(dateStr) {
+            if (!dateStr) return null;
+            // Parse "Jan 20, 2026" format
+            const date = new Date(dateStr + ' EST');
+            // Return in YYYY-MM-DD format for comparison
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
         }
 
         function getESTDateString() {
@@ -718,29 +726,8 @@
             document.getElementById('authView').classList.add('hidden');
             document.getElementById('appView').classList.remove('hidden');
             
-            // Load the flag from localStorage
-            const savedFlag = localStorage.getItem('fullListColumnCreatedToday');
-            const today = getESTDateString();
-            
-            // Only use saved flag if it's for today
-            if (savedFlag === today) {
-                fullListColumnCreatedToday = savedFlag;
-                console.log('Loaded flag from localStorage:', savedFlag);
-            } else {
-                fullListColumnCreatedToday = null;
-                localStorage.removeItem('fullListColumnCreatedToday');
-                console.log('Cleared old flag, today is:', today);
-            }
-            
-            // Check if event was confirmed today
-            const savedEventConfirmation = localStorage.getItem('eventConfirmedDate');
-            const savedEventName = localStorage.getItem('confirmedEventName');
-            
-            if (savedEventConfirmation === today && savedEventName) {
-                // Event was already confirmed today
-                document.getElementById('eventName').value = savedEventName;
-                confirmEventSilently();
-            }
+            // FIRST: Check if event is already set in FullList sheet
+            await checkSharedEventName();
             
             await loadYouthRoster();
             await loadTodayAttendance();
@@ -750,6 +737,136 @@
                 initScanner();
             }
             renderBulkCheckInList();
+        }
+
+        // NEW FUNCTION: Check if event is already set in FullList sheet (Issue 1)
+        async function checkSharedEventName() {
+            try {
+                // Try to read FullList!D2:D3 (date and event name)
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: CONFIG.SPREADSHEET_ID,
+                    range: `${CONFIG.FULLLIST_SHEET}!D2:D3`,
+                });
+                
+                const rows = response.result.values || [];
+                if (rows.length >= 2) {
+                    const dateStr = rows[0][0]; // D2: "Jan 20, 2026"
+                    const eventName = rows[1] ? rows[1][0] : ''; // D3: Event name
+                    
+                    // Parse the date from FullList
+                    const fullListDate = parseFullListDate(dateStr);
+                    const today = getESTDateString();
+                    
+                    // If FullList has today's date and an event name, auto-confirm
+                    if (fullListDate === today && eventName && eventName.trim() !== '') {
+                        document.getElementById('eventName').value = eventName;
+                        confirmEventSilently();
+                        console.log('Auto-confirmed event from FullList:', eventName);
+                        return true;
+                    }
+                }
+            } catch (err) {
+                console.error('Error checking shared event name (will fallback to localStorage):', err);
+                
+                // Fallback: Check localStorage if online check failed
+                const savedEventConfirmation = localStorage.getItem('eventConfirmedDate');
+                const savedEventName = localStorage.getItem('confirmedEventName');
+                const today = getESTDateString();
+                
+                if (savedEventConfirmation === today && savedEventName) {
+                    document.getElementById('eventName').value = savedEventName;
+                    confirmEventSilently();
+                    return true;
+                }
+            }
+            
+            return false;
+        }
+
+        // UPDATED: Save event to FullList sheet when confirmed (Issue 1)
+        async function saveEventToFullList(eventName) {
+            try {
+                const todayFullListFormat = getFullListDateString(); // "Jan 20, 2026"
+                const today = getESTDateString();
+                
+                // First, check if column D already has today's date (Issue 2)
+                const fullListResponse = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: CONFIG.SPREADSHEET_ID,
+                    range: `${CONFIG.FULLLIST_SHEET}!D2:D3`,
+                });
+                
+                const rows = fullListResponse.result.values || [];
+                let needToCreateColumn = true;
+                
+                if (rows.length >= 1 && rows[0][0]) {
+                    // Check if D2 has today's date
+                    const existingDate = parseFullListDate(rows[0][0]);
+                    if (existingDate === today) {
+                        needToCreateColumn = false;
+                        console.log('Column D already has today\'s date, updating event name');
+                    }
+                }
+                
+                if (needToCreateColumn) {
+                    console.log('Creating new column at D for today');
+                    
+                    // Insert a new column at D (index 3)
+                    const sheetId = await getSheetId(CONFIG.FULLLIST_SHEET);
+                    await gapi.client.sheets.spreadsheets.batchUpdate({
+                        spreadsheetId: CONFIG.SPREADSHEET_ID,
+                        resource: {
+                            requests: [{
+                                insertDimension: {
+                                    range: {
+                                        sheetId: sheetId,
+                                        dimension: 'COLUMNS',
+                                        startIndex: 3,
+                                        endIndex: 4
+                                    },
+                                    inheritFromBefore: false
+                                }
+                            }]
+                        }
+                    });
+                    
+                    // Add count formula in D1
+                    await gapi.client.sheets.spreadsheets.values.update({
+                        spreadsheetId: CONFIG.SPREADSHEET_ID,
+                        range: `${CONFIG.FULLLIST_SHEET}!D1`,
+                        valueInputOption: 'USER_ENTERED',
+                        resource: {
+                            values: [[`=COUNTIFS(D4:D100,"TRUE")`]]
+                        }
+                    });
+                }
+                
+                // Add date in D2 (in FullList format)
+                await gapi.client.sheets.spreadsheets.values.update({
+                    spreadsheetId: CONFIG.SPREADSHEET_ID,
+                    range: `${CONFIG.FULLLIST_SHEET}!D2`,
+                    valueInputOption: 'USER_ENTERED',
+                    resource: {
+                        values: [[todayFullListFormat]]
+                    }
+                });
+                
+                // Add event name in D3
+                await gapi.client.sheets.spreadsheets.values.update({
+                    spreadsheetId: CONFIG.SPREADSHEET_ID,
+                    range: `${CONFIG.FULLLIST_SHEET}!D3`,
+                    valueInputOption: 'USER_ENTERED',
+                    resource: {
+                        values: [[eventName]]
+                    }
+                });
+                
+                console.log('Event saved to FullList sheet:', eventName);
+                return true;
+                
+            } catch (err) {
+                console.error('Error saving event to FullList:', err);
+                return false;
+            }
         }
 
         function signOut() {
@@ -814,8 +931,28 @@
             }
         }
 
-        // Update FullList Sheet (INSERT new column at D, shift others right)
-        // WITH QUEUE TO PREVENT RACE CONDITIONS
+        // UPDATED: Check if column D has today's date before using it (Issue 2)
+        async function checkTodayColumnExists() {
+            try {
+                const response = await gapi.client.sheets.spreadsheets.values.get({
+                    spreadsheetId: CONFIG.SPREADSHEET_ID,
+                    range: `${CONFIG.FULLLIST_SHEET}!D2`,
+                });
+                
+                const rows = response.result.values || [];
+                if (rows.length > 0 && rows[0][0]) {
+                    const existingDate = parseFullListDate(rows[0][0]);
+                    const today = getESTDateString();
+                    return existingDate === today;
+                }
+                return false;
+            } catch (err) {
+                console.error('Error checking today column:', err);
+                return false;
+            }
+        }
+
+        // Update FullList Sheet (with FIX for Issue 2)
         async function updateFullList(youthId, fullName, eventName) {
             // Queue this update to prevent parallel execution
             fullListUpdateQueue = fullListUpdateQueue.then(async () => {
@@ -831,111 +968,140 @@
             try {
                 const today = getESTDateString();
                 
-                console.log(`Updating FullList for ${youthId}, today=${today}, columnCreated=${fullListColumnCreatedToday}`);
+                console.log(`Updating FullList for ${youthId}, today=${today}`);
                 
-                // Check if we already created a column for today in this session
-                if (fullListColumnCreatedToday === today) {
-                    console.log('Column already exists for today, just marking youth');
-                    await markYouthInFullList(youthId, fullName);
-                    return;
+                // FIRST: Check if column D has today's date (Issue 2)
+                const todayColumnExists = await checkTodayColumnExists();
+                
+                if (!todayColumnExists) {
+                    console.log('Column D does not have today\'s date, will check/create');
+                    // Column D might not exist or have wrong date
+                    // We need to ensure we have the right column
+                    await ensureTodayColumnExists(eventName);
                 }
                 
-                // Get FullList data
-                const fullListResponse = await gapi.client.sheets.spreadsheets.values.get({
-                    spreadsheetId: CONFIG.SPREADSHEET_ID,
-                    range: `${CONFIG.FULLLIST_SHEET}!A1:Z100`,
-                });
-                
-                const fullListData = fullListResponse.result.values || [];
-                console.log('FullList row 2, col D:', fullListData[1] ? fullListData[1][3] : 'undefined');
-                
-                // Check if column D already has today's date in row 2
-                let needNewColumn = true;
-                if (fullListData.length >= 2 && fullListData[1] && fullListData[1][3] === today) {
-                    console.log('Column D already has today\'s date');
-                    needNewColumn = false;
-                    fullListColumnCreatedToday = today; // Mark that column exists
-                    localStorage.setItem('fullListColumnCreatedToday', today); // Persist to localStorage
-                    
-                    // Update event name in D3 if different
-                    if (fullListData.length >= 3 && fullListData[2] && fullListData[2][3] !== eventName) {
-                        console.log('Updating event name in D3');
-                        await gapi.client.sheets.spreadsheets.values.update({
-                            spreadsheetId: CONFIG.SPREADSHEET_ID,
-                            range: `${CONFIG.FULLLIST_SHEET}!D3`,
-                            valueInputOption: 'USER_ENTERED',
-                            resource: {
-                                values: [[eventName]]
-                            }
-                        });
-                    }
-                }
-                
-                // If need new column, insert at D and shift everything right
-                if (needNewColumn) {
-                    console.log('Creating new column at D');
-                    
-                    // Insert a new column at D (index 3)
-                    await gapi.client.sheets.spreadsheets.batchUpdate({
-                        spreadsheetId: CONFIG.SPREADSHEET_ID,
-                        resource: {
-                            requests: [{
-                                insertDimension: {
-                                    range: {
-                                        sheetId: await getSheetId(CONFIG.FULLLIST_SHEET),
-                                        dimension: 'COLUMNS',
-                                        startIndex: 3,
-                                        endIndex: 4
-                                    },
-                                    inheritFromBefore: false
-                                }
-                            }]
-                        }
-                    });
-                    
-                    console.log('Column inserted, adding headers');
-                    
-                    // Add count formula in D1
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: CONFIG.SPREADSHEET_ID,
-                        range: `${CONFIG.FULLLIST_SHEET}!D1`,
-                        valueInputOption: 'USER_ENTERED',
-                        resource: {
-                            values: [[`=COUNTIFS(D4:D100,"TRUE")`]]
-                        }
-                    });
-                    
-                    // Add date in D2
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: CONFIG.SPREADSHEET_ID,
-                        range: `${CONFIG.FULLLIST_SHEET}!D2`,
-                        valueInputOption: 'USER_ENTERED',
-                        resource: {
-                            values: [[today]]
-                        }
-                    });
-                    
-                    // Add event name in D3
-                    await gapi.client.sheets.spreadsheets.values.update({
-                        spreadsheetId: CONFIG.SPREADSHEET_ID,
-                        range: `${CONFIG.FULLLIST_SHEET}!D3`,
-                        valueInputOption: 'USER_ENTERED',
-                        resource: {
-                            values: [[eventName]]
-                        }
-                    });
-                    
-                    // Mark that we created column for today
-                    fullListColumnCreatedToday = today;
-                    localStorage.setItem('fullListColumnCreatedToday', today); // Persist to localStorage
-                    console.log('Column created and flag set to:', today);
-                }
-                
-                // Now mark the youth
+                // Now mark the youth in column D
                 await markYouthInFullList(youthId, fullName);
                 
             } catch (err) {
                 console.error('Error in updateFullListInternal:', err);
+            }
+        }
+
+        // NEW FUNCTION: Ensure today's column exists in FullList
+        async function ensureTodayColumnExists(eventName) {
+            try {
+                // Check if column D exists and has today's date
+                const todayColumnExists = await checkTodayColumnExists();
+                
+                if (!todayColumnExists) {
+                    // We need to create/update column D
+                    console.log('Creating/updating column D for today');
+                    
+                    const todayFullListFormat = getFullListDateString();
+                    const today = getESTDateString();
+                    
+                    // Get current FullList data to see what columns exist
+                    const fullListResponse = await gapi.client.sheets.spreadsheets.values.get({
+                        spreadsheetId: CONFIG.SPREADSHEET_ID,
+                        range: `${CONFIG.FULLLIST_SHEET}!A1:Z2`, // Get first two rows
+                    });
+                    
+                    const fullListData = fullListResponse.result.values || [];
+                    let foundTodayColumn = false;
+                    let todayColumnIndex = 3; // Default to D
+                    
+                    // Check all columns starting from D (index 3) for today's date
+                    if (fullListData.length > 1 && fullListData[1]) {
+                        for (let col = 3; col < fullListData[1].length; col++) {
+                            const colDate = parseFullListDate(fullListData[1][col]);
+                            if (colDate === today) {
+                                foundTodayColumn = true;
+                                todayColumnIndex = col;
+                                console.log(`Found today's date in column index ${col}`);
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!foundTodayColumn) {
+                        // No column has today's date, use column D
+                        console.log('No column has today\'s date, using column D');
+                        
+                        // Check if column D has data (might be from a previous day)
+                        if (fullListData.length > 1 && fullListData[1] && fullListData[1][3]) {
+                            // Column D exists but has wrong date - update it
+                            console.log('Updating column D date to today');
+                            await gapi.client.sheets.spreadsheets.values.update({
+                                spreadsheetId: CONFIG.SPREADSHEET_ID,
+                                range: `${CONFIG.FULLLIST_SHEET}!D2`,
+                                valueInputOption: 'USER_ENTERED',
+                                resource: {
+                                    values: [[todayFullListFormat]]
+                                }
+                            });
+                            
+                            await gapi.client.sheets.spreadsheets.values.update({
+                                spreadsheetId: CONFIG.SPREADSHEET_ID,
+                                range: `${CONFIG.FULLLIST_SHEET}!D3`,
+                                valueInputOption: 'USER_ENTERED',
+                                resource: {
+                                    values: [[eventName]]
+                                }
+                            });
+                        } else {
+                            // Column D might not exist properly, ensure it does
+                            const sheetId = await getSheetId(CONFIG.FULLLIST_SHEET);
+                            await gapi.client.sheets.spreadsheets.batchUpdate({
+                                spreadsheetId: CONFIG.SPREADSHEET_ID,
+                                resource: {
+                                    requests: [{
+                                        insertDimension: {
+                                            range: {
+                                                sheetId: sheetId,
+                                                dimension: 'COLUMNS',
+                                                startIndex: 3,
+                                                endIndex: 4
+                                            },
+                                            inheritFromBefore: false
+                                        }
+                                    }]
+                                }
+                            });
+                            
+                            // Set up column D
+                            await gapi.client.sheets.spreadsheets.values.update({
+                                spreadsheetId: CONFIG.SPREADSHEET_ID,
+                                range: `${CONFIG.FULLLIST_SHEET}!D1`,
+                                valueInputOption: 'USER_ENTERED',
+                                resource: {
+                                    values: [[`=COUNTIFS(D4:D100,"TRUE")`]]
+                                }
+                            });
+                            
+                            await gapi.client.sheets.spreadsheets.values.update({
+                                spreadsheetId: CONFIG.SPREADSHEET_ID,
+                                range: `${CONFIG.FULLLIST_SHEET}!D2`,
+                                valueInputOption: 'USER_ENTERED',
+                                resource: {
+                                    values: [[todayFullListFormat]]
+                                }
+                            });
+                            
+                            await gapi.client.sheets.spreadsheets.values.update({
+                                spreadsheetId: CONFIG.SPREADSHEET_ID,
+                                range: `${CONFIG.FULLLIST_SHEET}!D3`,
+                                valueInputOption: 'USER_ENTERED',
+                                resource: {
+                                    values: [[eventName]]
+                                }
+                            });
+                        }
+                    }
+                }
+                
+            } catch (err) {
+                console.error('Error ensuring today column exists:', err);
             }
         }
 
@@ -1339,8 +1505,8 @@
             document.getElementById('dateDisplay').textContent = est.toLocaleDateString('en-US', options);
         }
 
-        // Event Confirmation Functions
-        function confirmEvent() {
+        // UPDATED: Event Confirmation Functions with FullList integration
+        async function confirmEvent() {
             const eventName = document.getElementById('eventName').value.trim();
             
             if (!eventName) {
@@ -1349,10 +1515,18 @@
                 return;
             }
             
+            // Save event name to FullList sheet (for all scouters to see)
+            const success = await saveEventToFullList(eventName);
+            
+            if (!success) {
+                alert('Warning: Could not save event to shared sheet. Check your connection.');
+                // Continue anyway with localStorage fallback
+            }
+            
             // Mark as confirmed
             isEventConfirmed = true;
             
-            // Save to localStorage
+            // Save to localStorage as fallback
             const today = getESTDateString();
             localStorage.setItem('eventConfirmedDate', today);
             localStorage.setItem('confirmedEventName', eventName);
@@ -1373,10 +1547,10 @@
                 initScanner();
             }
             
-            console.log('Event confirmed:', eventName);
+            console.log('Event confirmed and saved to FullList:', eventName);
         }
 
-        // Confirm event silently (when loading from localStorage)
+        // Confirm event silently (when loading from FullList or localStorage)
         function confirmEventSilently() {
             const eventName = document.getElementById('eventName').value.trim();
             
@@ -1542,3 +1716,4 @@
     </script>
 </body>
 </html>
+[file content end]
