@@ -129,9 +129,11 @@
             overflow: hidden;
             margin: 10px 0;
             background: #000;
-            max-height: 250px;
+            min-height: 300px;        /* ensure minimum height */
+            max-height: 50vh;          /* use viewport height for responsiveness */
+            width: 100%;               /* full width */
         }
-
+        
         .scan-result {
             padding: 12px;
             background: #e8f5e9;
