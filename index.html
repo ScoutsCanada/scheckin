@@ -647,31 +647,29 @@
             return `${year}-${month}-${day}`;
         }
 
-        // Replace the getESTTimestamp function with this simpler version:
+        // Replace the existing getESTTimestamp function (keep it exactly as is)
         function getESTTimestamp() {
-            const now = new Date();
-            // Get the current time in EST
-            const estTime = now.toLocaleString('en-US', { 
-                timeZone: 'America/New_York',
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: false
-            });
-            
-            // Parse it back to a consistent format
-            const [datePart, timePart] = estTime.split(', ');
-            const [month, day, year] = datePart.split('/');
-            const [hour, minute, second] = timePart.split(':');
-            
-            // Return as ISO-like string but with EST values
-            return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
+            const est = getESTDate();
+            // Extract UTC components which represent EST time
+            const year = est.getUTCFullYear();
+            const month = String(est.getUTCMonth() + 1).padStart(2, '0');
+            const day = String(est.getUTCDate()).padStart(2, '0');
+            const hour = String(est.getUTCHours()).padStart(2, '0');
+            const minute = String(est.getUTCMinutes()).padStart(2, '0');
+            const second = String(est.getUTCSeconds()).padStart(2, '0');
+            const ms = String(est.getUTCMilliseconds()).padStart(3, '0');
+            return `${year}-${month}-${day}T${hour}:${minute}:${second}.${ms}Z`;
         }
         
-        // Then in updateAttendanceDisplay, simply use the time string directly:
+        // Initialize on load
+        window.addEventListener('load', () => {
+            updateDate();
+            checkOnlineStatus();
+            loadOfflineQueue();
+            gapiLoaded();
+            gisLoaded();
+        });
+        
         function updateAttendanceDisplay() {
             const count = todayAttendance.length;
             const total = youthRoster.length;
@@ -682,16 +680,25 @@
             
             const listDiv = document.getElementById('attendanceList');
             listDiv.innerHTML = todayAttendance.map(a => {
-                // Extract time from timestamp (format: "2026-02-19T12:28:45")
+                // Parse the timestamp correctly
+                // Format example: "2026-02-19T17:28:45.123Z"
                 let timeStr = "Unknown";
+                
                 if (a.timestamp) {
-                    const timeMatch = a.timestamp.match(/T(\d{2}):(\d{2})/);
-                    if (timeMatch) {
-                        const hour = parseInt(timeMatch[1]);
-                        const minute = timeMatch[2];
-                        const ampm = hour >= 12 ? 'PM' : 'AM';
-                        const displayHour = hour % 12 || 12;
-                        timeStr = `${displayHour}:${minute} ${ampm}`;
+                    try {
+                        // Create date from the timestamp string
+                        const date = new Date(a.timestamp);
+                        
+                        // Format to EST time
+                        timeStr = date.toLocaleTimeString('en-US', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true,
+                            timeZone: 'America/New_York'
+                        });
+                    } catch (e) {
+                        console.error('Error parsing timestamp:', e);
+                        timeStr = a.timestamp.substring(11, 16); // Fallback: extract HH:MM
                     }
                 }
                 
@@ -709,7 +716,6 @@
             document.getElementById('attendanceLoading').classList.add('hidden');
             listDiv.classList.remove('hidden');
         }
-
         // Google API initialization
         function gapiLoaded() {
             gapi.load('client', initializeGapiClient);
