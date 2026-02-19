@@ -1315,59 +1315,67 @@
 
         async function bulkCheckIn() {
             const checkboxes = document.querySelectorAll('#youthCheckboxList input[type="checkbox"]:checked');
-            
             if (checkboxes.length === 0) {
                 alert('Please select at least one youth to check in');
                 return;
             }
-            
+        
             // Disable button during processing
             const btn = document.getElementById('bulkCheckInBtn');
             btn.disabled = true;
-            btn.textContent = 'Processing...';
-            
-            const eventName = document.getElementById('eventName').value.trim() || 'Weekly Meeting';
-            const timestamp = getESTTimestamp();
-            const date = getESTDateString();
-            
-            const records = [];
-            const youthIds = [];
-            
-            checkboxes.forEach(cb => {
-                const youthId = cb.value;
-                const youth = youthRoster.find(y => y.id === youthId);
-                if (youth) {
-                    records.push([timestamp, date, youthId, youth.fullName, eventName, 'Bulk check-in']);
-                    youthIds.push({ id: youthId, fullName: youth.fullName });
-                }
-            });
-            
-            if (records.length === 0) {
-                btn.disabled = false;
-                btn.textContent = 'Check In Selected Youth';
-                return;
-            }
-            
+            btn.textContent = 'Checking...';
+        
             try {
+                // Fetch the latest attendance from the sheet
+                const freshAttendance = await fetchFreshTodayAttendance();
+                if (!freshAttendance) {
+                    alert('Could not verify current attendance. Please check your connection.');
+                    return;
+                }
+        
+                // Build list of youth to check in, excluding those already in freshAttendance
+                const eventName = document.getElementById('eventName').value.trim() || 'Weekly Meeting';
+                const timestamp = getESTTimestamp();
+                const date = getESTDateString();
+        
+                const alreadyCheckedInIds = new Set(freshAttendance.map(a => a.youthId));
+                const recordsToAdd = [];
+                const youthToMark = [];
+        
+                checkboxes.forEach(cb => {
+                    const youthId = cb.value;
+                    const youth = youthRoster.find(y => y.id === youthId);
+                    if (youth && !alreadyCheckedInIds.has(youthId)) {
+                        recordsToAdd.push([timestamp, date, youthId, youth.fullName, eventName, 'Bulk check-in']);
+                        youthToMark.push({ id: youthId, fullName: youth.fullName });
+                    }
+                });
+        
+                if (recordsToAdd.length === 0) {
+                    alert('All selected youth have already been checked in today.');
+                    return;
+                }
+        
+                btn.textContent = 'Submitting...';
+        
                 // Write to Attendance sheet
                 await gapi.client.sheets.spreadsheets.values.append({
                     spreadsheetId: CONFIG.SPREADSHEET_ID,
                     range: `${CONFIG.ATTENDANCE_SHEET}!A:F`,
                     valueInputOption: 'USER_ENTERED',
-                    resource: {
-                        values: records
-                    }
+                    resource: { values: recordsToAdd }
                 });
-                
+        
                 // Update FullList for each youth
-                for (const youth of youthIds) {
+                for (const youth of youthToMark) {
                     await updateFullList(youth.id, youth.fullName, eventName);
                 }
-                
-                alert(`✓ Successfully checked in ${records.length} youth!`);
-                await loadTodayAttendance();
+        
+                // Refresh local attendance and UI
+                await loadTodayAttendance(); // reloads todayAttendance from sheet
                 deselectAllYouth();
-                renderBulkCheckInList(); // Re-render to show checked-in youth as disabled
+                renderBulkCheckInList();
+                alert(`✓ Successfully checked in ${recordsToAdd.length} youth!`);
             } catch (err) {
                 console.error('Error with bulk check-in:', err);
                 alert('Error: Could not complete bulk check-in. Please try again.');
@@ -1376,7 +1384,6 @@
                 btn.textContent = 'Check In Selected Youth';
             }
         }
-
         // QR Scanner
         function initScanner() {
             html5QrCode = new Html5Qrcode("reader");
@@ -1688,10 +1695,28 @@
 
         async function syncOfflineQueue() {
             if (offlineQueue.length === 0) return;
-            
-            const toSync = [...offlineQueue];
+        
+            // Fetch fresh attendance to avoid duplicates
+            const freshAttendance = await fetchFreshTodayAttendance();
+            if (!freshAttendance) {
+                console.warn('Cannot sync offline queue: unable to fetch current attendance.');
+                return; // skip sync, will retry later on next online event
+            }
+        
+            const alreadyCheckedInIds = new Set(freshAttendance.map(a => a.youthId));
+            const toSync = offlineQueue.filter(record => !alreadyCheckedInIds.has(record.youthId));
+        
+            if (toSync.length === 0) {
+                // All queued records are already in the sheet, just clear the queue
+                offlineQueue = [];
+                localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
+                document.getElementById('syncQueue').classList.add('hidden');
+                await loadTodayAttendance(); // refresh local list
+                return;
+            }
+        
             const values = toSync.map(r => [r.timestamp, r.date, r.youthId, r.fullName, r.eventName, 'Synced from offline']);
-            
+        
             try {
                 await gapi.client.sheets.spreadsheets.values.append({
                     spreadsheetId: CONFIG.SPREADSHEET_ID,
@@ -1699,18 +1724,21 @@
                     valueInputOption: 'USER_ENTERED',
                     resource: { values }
                 });
-                
+        
                 for (const record of toSync) {
                     await updateFullList(record.youthId, record.fullName, record.eventName);
                 }
-                
-                offlineQueue = [];
+        
+                // Remove only the successfully synced records from the queue
+                offlineQueue = offlineQueue.filter(record => alreadyCheckedInIds.has(record.youthId));
                 localStorage.setItem('offlineQueue', JSON.stringify(offlineQueue));
-                document.getElementById('syncQueue').classList.add('hidden');
-                
-                await loadTodayAttendance();
+                document.getElementById('syncQueue').classList.toggle('hidden', offlineQueue.length === 0);
+                document.getElementById('queueCount').textContent = offlineQueue.length;
+        
+                await loadTodayAttendance(); // refresh local attendance
             } catch (err) {
                 console.error('Sync failed:', err);
+                // Leave queue intact for next attempt
             }
         }
     </script>
