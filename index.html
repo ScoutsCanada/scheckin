@@ -647,27 +647,68 @@
             return `${year}-${month}-${day}`;
         }
 
+        // Replace the getESTTimestamp function with this simpler version:
         function getESTTimestamp() {
-            const est = getESTDate();
-            // Extract UTC components which represent EST time
-            const year = est.getUTCFullYear();
-            const month = String(est.getUTCMonth() + 1).padStart(2, '0');
-            const day = String(est.getUTCDate()).padStart(2, '0');
-            const hour = String(est.getUTCHours()).padStart(2, '0');
-            const minute = String(est.getUTCMinutes()).padStart(2, '0');
-            const second = String(est.getUTCSeconds()).padStart(2, '0');
-            const ms = String(est.getUTCMilliseconds()).padStart(3, '0');
-            return `${year}-${month}-${day}T${hour}:${minute}:${second}.${ms}Z`;
+            const now = new Date();
+            // Get the current time in EST
+            const estTime = now.toLocaleString('en-US', { 
+                timeZone: 'America/New_York',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            });
+            
+            // Parse it back to a consistent format
+            const [datePart, timePart] = estTime.split(', ');
+            const [month, day, year] = datePart.split('/');
+            const [hour, minute, second] = timePart.split(':');
+            
+            // Return as ISO-like string but with EST values
+            return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
         }
-
-        // Initialize on load
-        window.addEventListener('load', () => {
-            updateDate();
-            checkOnlineStatus();
-            loadOfflineQueue();
-            gapiLoaded();
-            gisLoaded();
-        });
+        
+        // Then in updateAttendanceDisplay, simply use the time string directly:
+        function updateAttendanceDisplay() {
+            const count = todayAttendance.length;
+            const total = youthRoster.length;
+            const percent = total > 0 ? Math.round((count / total) * 100) : 0;
+            
+            document.getElementById('checkedInCount').textContent = count;
+            document.getElementById('attendancePercent').textContent = `${percent}%`;
+            
+            const listDiv = document.getElementById('attendanceList');
+            listDiv.innerHTML = todayAttendance.map(a => {
+                // Extract time from timestamp (format: "2026-02-19T12:28:45")
+                let timeStr = "Unknown";
+                if (a.timestamp) {
+                    const timeMatch = a.timestamp.match(/T(\d{2}):(\d{2})/);
+                    if (timeMatch) {
+                        const hour = parseInt(timeMatch[1]);
+                        const minute = timeMatch[2];
+                        const ampm = hour >= 12 ? 'PM' : 'AM';
+                        const displayHour = hour % 12 || 12;
+                        timeStr = `${displayHour}:${minute} ${ampm}`;
+                    }
+                }
+                
+                return `
+                    <div class="attendance-item">
+                        <div>
+                            <div class="attendance-name">${a.fullName || a.youthId}</div>
+                            <div class="attendance-id">${a.youthId} • ${a.eventName}</div>
+                        </div>
+                        <div class="attendance-time">${timeStr}</div>
+                    </div>
+                `;
+            }).join('');
+            
+            document.getElementById('attendanceLoading').classList.add('hidden');
+            listDiv.classList.remove('hidden');
+        }
 
         // Google API initialization
         function gapiLoaded() {
