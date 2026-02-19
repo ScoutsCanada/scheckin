@@ -680,25 +680,26 @@
             
             const listDiv = document.getElementById('attendanceList');
             listDiv.innerHTML = todayAttendance.map(a => {
-                // Parse the timestamp correctly
-                // Format example: "2026-02-19T17:28:45.123Z"
                 let timeStr = "Unknown";
                 
                 if (a.timestamp) {
                     try {
-                        // Create date from the timestamp string
-                        const date = new Date(a.timestamp);
-                        
-                        // Format to EST time
-                        timeStr = date.toLocaleTimeString('en-US', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: true,
-                            timeZone: 'America/New_York'
-                        });
+                        // Extract hour and minute from the stored UTC string
+                        // Format: "2026-02-19T17:28:45.123Z"
+                        const match = a.timestamp.match(/T(\d{2}):(\d{2})/);
+                        if (match) {
+                            let hour = parseInt(match[1], 10);
+                            const minute = match[2];
+                            
+                            // Convert from UTC to EST (UTC-5)
+                            hour = (hour - 5 + 24) % 24;  // handles wrap-around
+                            
+                            const ampm = hour >= 12 ? 'PM' : 'AM';
+                            const displayHour = hour % 12 || 12;
+                            timeStr = `${displayHour}:${minute} ${ampm}`;
+                        }
                     } catch (e) {
                         console.error('Error parsing timestamp:', e);
-                        timeStr = a.timestamp.substring(11, 16); // Fallback: extract HH:MM
                     }
                 }
                 
