@@ -1312,7 +1312,28 @@
             const checkboxes = document.querySelectorAll('#youthCheckboxList input[type="checkbox"]');
             checkboxes.forEach(cb => cb.checked = false);
         }
-
+        async function fetchFreshTodayAttendance() {
+    const today = getESTDateString();
+    try {
+        const response = await gapi.client.sheets.spreadsheets.values.get({
+            spreadsheetId: CONFIG.SPREADSHEET_ID,
+            range: `${CONFIG.ATTENDANCE_SHEET}!A2:F`,
+        });
+        const rows = response.result.values || [];
+        return rows
+            .filter(row => row[1] === today)
+            .map(row => ({
+                timestamp: row[0],
+                date: row[1],
+                youthId: row[2],
+                fullName: row[3],
+                eventName: row[4] || 'Weekly Meeting'
+            }));
+    } catch (err) {
+        console.error('Error fetching fresh attendance:', err);
+        return null; // indicate failure
+    }
+}
         async function bulkCheckIn() {
             const checkboxes = document.querySelectorAll('#youthCheckboxList input[type="checkbox"]:checked');
             if (checkboxes.length === 0) {
